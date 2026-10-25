@@ -141,3 +141,19 @@ func TestConcurrentClients(t *testing.T) {
 	}
 	clients.Wait()
 }
+
+func TestCollectionReplies(t *testing.T) {
+	s := &server{store: store.New()}
+	first := connect(t, s)
+	second := connect(t, s)
+	checkReply(t, first, ":2\r\n", "LPUSH", "list", "a", "b")
+	checkReply(t, second, "*2\r\n$1\r\nb\r\n$1\r\na\r\n", "LRANGE", "list", "0", "-1")
+	checkReply(t, first, ":1\r\n", "SADD", "set", "a", "a")
+	checkReply(t, second, "*1\r\n$1\r\na\r\n", "SMEMBERS", "set")
+	checkReply(t, first, ":1\r\n", "HSET", "hash", "field", "a\r\n\x00b")
+	checkReply(t, second, "$5\r\na\r\n\x00b\r\n", "HGET", "hash", "field")
+	checkReply(t, first, ":2\r\n", "ZADD", "scores", "2", "b", "1", "a")
+	checkReply(t, second, "*4\r\n$1\r\na\r\n$1\r\n1\r\n$1\r\nb\r\n$1\r\n2\r\n", "ZRANGE", "scores", "0", "-1", "WITHSCORES")
+	checkReply(t, second, "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n", "GET", "list")
+	checkReply(t, second, "+PONG\r\n", "PING")
+}

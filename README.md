@@ -12,11 +12,55 @@ Code layout:
 
 Each client gets a `handleConnection` goroutine. It reads RESP commands through
 a buffered reader backed by `conn.Read`, dispatches them, and uses `conn.Write`
-for replies. All clients share a mutex-protected `map[string]string`.
+for replies. All clients share one mutex-protected map of typed values.
 
-Supported commands: `PING [message]`, `ECHO message`, `SET key value`, `GET key`,
-and `DEL key [key ...]`. Command names are case insensitive. A missing key returns
-a RESP null bulk string; `DEL` returns the number of keys deleted.
+Command names are case insensitive. These are the supported forms:
+
+| Type | Commands | Stored as |
+| --- | --- | --- |
+| General | `PING [message]`, `ECHO message`, `DEL key [key ...]`, `EXISTS key [key ...]`, `TYPE key` | One shared keyspace |
+| Strings | `SET key value`, `GET key` | Go string |
+| Lists | `LPUSH key value [value ...]`, `RPUSH key value [value ...]`, `LPOP key`, `RPOP key`, `LRANGE key start stop`, `LLEN key` | `[]string` |
+| Sets | `SADD key member [member ...]`, `SREM key member [member ...]`, `SMEMBERS key`, `SISMEMBER key member`, `SCARD key` | `map[string]bool` |
+| Hashes | `HSET key field value [field value ...]`, `HGET key field`, `HDEL key field [field ...]`, `HGETALL key`, `HLEN key` | `map[string]string` |
+| Sorted sets | `ZADD key score member [score member ...]`, `ZRANGE key start stop [WITHSCORES]`, `ZSCORE key member`, `ZREM key member [member ...]`, `ZCARD key` | `map[string]float64`, sorted on reads |
+
+Each key has one type. Using the wrong type returns `WRONGTYPE`. `SET` replaces
+any previous value. Removing a collection's last item removes its key too.
+Missing values return null, zero, or an empty array as appropriate.
+
+Ranges have inclusive endpoints; negative indexes count from the end (`-1` is
+the last item). Sorted sets order by score, then member name for ties. Sets and
+hashes return members/fields alphabetically for predictable output (Redis does
+not guarantee an order for those commands).
+
+These are deliberately simple implementations, not Redis's optimized internals.
+For example, sorted-set ranges sort the whole set, and pushing onto the front
+of a list copies the list. Advanced command options, blocking commands, streams,
+and other Redis types are not implemented yet.
+
+After changing code, stop the server with Ctrl+C and run `go run ./cmd/miniredis`
+again. In a separate terminal, connect with `redis-cli -p 6379` and try:
+
+```text
+RPUSH tasks first second
+LRANGE tasks 0 -1
+LPOP tasks
+
+SADD tags go redis go
+SMEMBERS tags
+
+HSET user:1 name tushar language Go
+HGETALL user:1
+
+ZADD leaderboard 10 alice 20 bob
+ZRANGE leaderboard 0 -1 WITHSCORES
+
+TYPE tasks
+GET tasks
+```
+
+The last command intentionally returns `WRONGTYPE` because `tasks` is a list.
 
 Requests must be RESP arrays of bulk strings (the format used by Redis clients).
 For example, `GET key` is `*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n` on the wire.

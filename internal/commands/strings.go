@@ -11,7 +11,10 @@ func set(db *store.Store, key, value string) string {
 }
 
 func get(db *store.Store, key string) string {
-	value, exists := db.Get(key)
+	value, exists, err := db.Get(key)
+	if err != nil {
+		return resp.WrongType()
+	}
 	if !exists {
 		return resp.NullBulkString()
 	}
