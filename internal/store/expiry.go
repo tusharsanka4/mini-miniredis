@@ -1,3 +1,3 @@
 package store
 
-// Expiration and a testable clock will be added later.
+// Expiration will be added later, using the store's clock.Now().

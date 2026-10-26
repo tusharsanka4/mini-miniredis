@@ -3,6 +3,8 @@ package store
 import (
 	"errors"
 	"sync"
+
+	"github.com/tusharsanka4/mini-miniredis/internal/clock"
 )
 
 var ErrWrongType = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
@@ -21,10 +23,19 @@ type entry struct {
 type Store struct {
 	mu     sync.Mutex
 	values map[string]*entry
+	clock  clock.Clock
 }
 
 func New() *Store {
-	return &Store{values: make(map[string]*entry)}
+	return NewWithClock(clock.Real{})
+}
+
+// NewWithClock lets tests control time. Passing nil uses the real clock.
+func NewWithClock(c clock.Clock) *Store {
+	if c == nil {
+		c = clock.Real{}
+	}
+	return &Store{values: make(map[string]*entry), clock: c}
 }
 
 func (s *Store) Set(key, value string) {

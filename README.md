@@ -9,6 +9,7 @@ Code layout:
 - `internal/resp`: command parser and reply formatting.
 - `internal/store`: shared map and its mutex. `expiry.go` is a placeholder for later.
 - `internal/commands`: command dispatcher and string command handlers.
+- `internal/clock`: real time and a manually controlled clock for tests.
 
 Each client gets a `handleConnection` goroutine. It reads RESP commands through
 a buffered reader backed by `conn.Read`, dispatches them, and uses `conn.Write`
@@ -71,5 +72,23 @@ unknown commands and wrong argument counts get an error and keep it open.
 
 Values live in memory until deleted or the process stops. There is no expiration
 or persistence yet.
+
+The store uses real time by default. Tests can supply a manual clock:
+
+```go
+c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+db := store.NewWithClock(c)
+db.Set("name", "tushar")
+
+c.Advance(5 * time.Second) // Moves instantly, without sleeping.
+now := c.Now()
+c.Set(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+```
+
+Import `time`, `github.com/tusharsanka4/mini-miniredis/internal/clock`, and
+`github.com/tusharsanka4/mini-miniredis/internal/store` in the test using it.
+Manual time stays fixed until changed, and it can move forward or backward.
+The store keeps the supplied clock for future expiration handling; advancing
+it does not expire values yet.
 
 Run tests with `go test ./...` (or `go test -race ./...` with a C compiler installed).
