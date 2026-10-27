@@ -72,6 +72,10 @@ func dispatch(db *store.Store, args []string) string {
 		return sortedSetCommand(db, command, args)
 	case "MULTI", "EXEC", "DISCARD":
 		return resp.Error("transactions require a persistent TCP connection")
+	case "PUBLISH":
+		return resp.Integer(db.PubSub.Publish(args[1], args[2]))
+	case "SUBSCRIBE", "UNSUBSCRIBE":
+		return resp.Error("subscriptions require a persistent TCP connection")
 	default:
 		return resp.Error("unknown command")
 	}

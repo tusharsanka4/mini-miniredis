@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/tusharsanka4/mini-miniredis/internal/clock"
+	"github.com/tusharsanka4/mini-miniredis/internal/pubsub"
 )
 
 var ErrWrongType = errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
@@ -25,6 +26,7 @@ type Store struct {
 	mu        sync.Mutex
 	values    map[string]*entry
 	clock     clock.Clock
+	PubSub    *pubsub.Registry
 }
 
 // The command lock is shared by TCP and HTTP. EXEC holds it for the whole queue.
@@ -46,7 +48,7 @@ func NewWithClock(c clock.Clock) *Store {
 	if c == nil {
 		c = clock.Real{}
 	}
-	return &Store{values: make(map[string]*entry), clock: c}
+	return &Store{values: make(map[string]*entry), clock: c, PubSub: pubsub.New()}
 }
 
 func (s *Store) Set(key, value string) {

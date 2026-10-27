@@ -19,10 +19,12 @@ func Validate(args []string) error {
 		valid = len(args) == 1 || len(args) == 2
 	case "ECHO", "GET", "TYPE", "LPOP", "RPOP", "LLEN", "SMEMBERS", "SCARD", "HGETALL", "HLEN", "ZCARD":
 		valid = len(args) == 2
-	case "SET", "SISMEMBER", "HGET", "ZSCORE":
+	case "SET", "SISMEMBER", "HGET", "ZSCORE", "PUBLISH":
 		valid = len(args) == 3
-	case "DEL", "EXISTS":
+	case "DEL", "EXISTS", "SUBSCRIBE":
 		valid = len(args) >= 2
+	case "UNSUBSCRIBE":
+		valid = len(args) >= 1
 	case "LPUSH", "RPUSH", "SADD", "SREM", "HDEL", "ZREM":
 		valid = len(args) >= 3
 	case "HSET", "ZADD":

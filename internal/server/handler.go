@@ -9,7 +9,9 @@ import (
 )
 
 func (s *server) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	c := newClient(conn)
+	defer c.close()
+	defer s.store.PubSub.Remove(c)
 
 	// The buffered reader calls conn.Read and keeps bytes for the next command.
 	reader := bufio.NewReader(conn)
@@ -19,12 +21,13 @@ func (s *server) handleConnection(conn net.Conn) {
 		args, err := resp.ReadCommand(reader)
 		if err != nil {
 			if err != io.EOF {
-				conn.Write([]byte(resp.Error("invalid RESP command")))
+				c.writeReply(resp.Error("invalid RESP command"))
 			}
 			return
 		}
 
-		if _, err := conn.Write([]byte(tx.handle(s.store, args))); err != nil {
+		reply := c.handle(s.store, &tx, args)
+		if reply != "" && !c.writeReply(reply) {
 			return
 		}
 	}

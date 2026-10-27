@@ -4,8 +4,9 @@ A small Redis-like server written in Go, built to understand how the pieces work
 It accepts Redis TCP commands and HTTP JSON requests, and stores values in memory.
 The code favors straightforward functions, slices, and maps.
 
-It supports strings, lists, sets, hashes, sorted sets, and a controllable clock
-for tests. This is a learning project with a subset of Redis commands.
+It supports strings, lists, sets, hashes, sorted sets, transactions, pub/sub,
+and a controllable clock for tests. This is a learning project with a subset
+of Redis commands.
 
 ## Run the server
 
@@ -45,9 +46,10 @@ The HTTP API runs at `http://127.0.0.1:8080` by default. The contract is in
 [openapi.json](openapi.json), which can be imported into Postman. It uses the
 same commands and argument rules listed below.
 
-`MULTI`, `EXEC`, and `DISCARD` require a persistent TCP connection and are not
+`MULTI`, `EXEC`, `DISCARD`, `SUBSCRIBE`, and `UNSUBSCRIBE` require a persistent TCP connection and are not
 available through this stateless HTTP endpoint. HTTP commands still use the
 shared command mutex, so they cannot interrupt a TCP transaction's execution.
+`PUBLISH` is available over both TCP and HTTP.
 
 ### Check the server
 
@@ -321,13 +323,74 @@ QUEUED
 [Redis transaction documentation](https://redis.io/docs/latest/develop/using-commands/transactions/)
 for the underlying queueing and error behavior.
 
+## Publish/subscribe messaging
+
+Use one TCP client to subscribe to a channel:
+
+```text
+SUBSCRIBE news
+```
+
+The acknowledgement contains `subscribe`, the channel name, and the number of
+channels this client is subscribed to. In a second client, publish a message:
+
+```text
+PUBLISH news "hello everyone"
+```
+
+The publisher receives the number of clients whose message was queued. Each
+subscriber receives a RESP array containing `message`, `news`, and
+`hello everyone`. The same message goes to every subscriber of that channel.
+
+| Command | Behavior |
+| --- | --- |
+| `SUBSCRIBE channel [channel ...]` | Adds this TCP client to each channel's subscriber map |
+| `UNSUBSCRIBE [channel ...]` | Removes subscriptions; with no arguments, removes all |
+| `PUBLISH channel message` | Queues the message for each subscriber and returns the recipient count |
+
+Duplicate subscriptions produce acknowledgements but do not duplicate messages.
+Unsubscribing from the last channel returns the connection to normal command
+mode. While subscribed, this implementation accepts `SUBSCRIBE`, `UNSUBSCRIBE`,
+and `PING`; subscribed `PING` returns a `pong` array. Disconnecting automatically
+removes all subscriptions. In interactive `redis-cli`, use **Ctrl+C** to leave
+subscriber mode and close the connection.
+
+Publish through HTTP with the same command format:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8080/command -Method Post -ContentType application/json -Body '{"command":["PUBLISH","news","hello from HTTP"]}'
+```
+
+Channels are separate from stored keys. Messages are transient: there is no
+history, replay, or delivery acknowledgement. `PUBLISH` can be queued inside a
+transaction and runs on `EXEC`. To keep connection state simple, `SUBSCRIBE`
+and `UNSUBSCRIBE` inside `MULTI` are rejected and cause `EXECABORT`.
+
+### Subscriber registry and coordinated writes
+
+The registry is a Go `map[channel]map[subscriber]bool` protected by its own
+mutex. Publishing iterates the channel's map and enqueues a message for each
+subscriber. Subscription acknowledgements are enqueued before any new messages
+for that subscription.
+
+Each TCP client has one outgoing channel and exactly one writer goroutine.
+All command replies, subscription acknowledgements, and pushed messages use
+that channel. Only the writer accesses `conn.Write`, so complete RESP frames
+cannot mix their bytes even when several publishers are active.
+
+The outgoing channel holds 64 pending reply batches. A full queue or a write
+taking longer than 10 seconds disconnects that client. Publishers do not wait
+for network writes or for slow subscribers to catch up. Pending messages may
+be lost on disconnect; counts mean queued recipients, not confirmed delivery.
+
 ## How it works
 
 1. `net.Listen` opens the TCP listener.
 2. `listener.Accept` accepts a client and starts a `handleConnection` goroutine.
 3. A buffered reader backed by `conn.Read` passes bytes to the RESP parser.
 4. The dispatcher checks the command and arguments, then calls the store.
-5. Reply helpers format RESP responses, sent through `conn.Write`.
+5. Reply helpers format RESP responses and enqueue them for the client's writer
+   goroutine, which sends them through `conn.Write`.
 
 All clients share one store. Its command mutex serializes normal commands and
 holds off other clients for the whole execution of `EXEC`. A separate map mutex
@@ -409,6 +472,7 @@ mini-miniredis/
 │   ├── api/         # HTTP handlers and JSON replies, with tests
 │   ├── server/      # Listener, connection handler, transactions, and tests
 │   ├── resp/        # RESP parser and reply formatting
+│   ├── pubsub/      # Channel-to-subscribers map and message fan-out
 │   ├── store/       # Typed values, mutex, and data-type operations
 │   └── commands/    # Dispatcher, command handlers, and command tests
 └── README.md
@@ -432,6 +496,8 @@ Tests cover RESP parsing, fragmented and pipelined requests, shared client data,
 data-type operations, wrong-type errors, concurrent access, manual time, HTTP
 request validation, JSON responses, per-connection transaction queues, aborted
 transactions, and atomic execution against competing TCP and HTTP clients.
+Pub/sub tests cover fan-out, channel isolation, disconnect cleanup, slow readers,
+HTTP and transactional publishing, and concurrent replies sharing one writer.
 
 If your Go environment supports cgo and has a C compiler installed, also run:
 
@@ -443,7 +509,7 @@ go test -race ./...
 
 - Data exists only in memory; there is no persistence or expiration.
 - Only the command forms listed above are implemented. Advanced options,
-  WATCH, blocking commands, pub/sub, and streams are not available.
+  WATCH, blocking commands, pattern subscriptions, and streams are not available.
 - The protocol is a subset of RESP2; RESP3 is not supported.
 - There is one shared keyspace, with no database selection, authentication, or TLS.
 - The server binds to localhost by default and is intended for local learning

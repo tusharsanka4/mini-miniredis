@@ -18,6 +18,7 @@ func TestCommands(t *testing.T) {
 		want string
 	}{
 		{`{"command":["PING"]}`, `{"result":"PONG"}`},
+		{`{"command":["PUBLISH","empty-channel","message"]}`, `{"result":0}`},
 		{`{"command":["GET","missing"]}`, `{"result":null}`},
 		{`{"command":["SET","name","tushar"]}`, `{"result":"OK"}`},
 		{`{"command":["GET","name"]}`, `{"result":"tushar"}`},
@@ -87,6 +88,9 @@ func TestRequestErrorsDoNotWrite(t *testing.T) {
 		{"too many arguments", `{"command":["DEL"` + strings.Repeat(`,"key"`, 1024) + `]}`, "application/json", 400},
 		{"wrong arity", `{"command":["SET","key"]}`, "application/json", 400},
 		{"unknown command", `{"command":["NOPE"]}`, "application/json", 400},
+		{"SUBSCRIBE needs a connection", `{"command":["SUBSCRIBE","news"]}`, "application/json", 400},
+		{"UNSUBSCRIBE needs a connection", `{"command":["UNSUBSCRIBE"]}`, "application/json", 400},
+		{"publish needs message", `{"command":["PUBLISH","news"]}`, "application/json", 400},
 		{"MULTI needs a connection", `{"command":["MULTI"]}`, "application/json", 400},
 		{"EXEC needs a connection", `{"command":["EXEC"]}`, "application/json", 400},
 		{"DISCARD needs a connection", `{"command":["DISCARD"]}`, "application/json", 400},
