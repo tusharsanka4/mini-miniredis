@@ -45,6 +45,10 @@ The HTTP API runs at `http://127.0.0.1:8080` by default. The contract is in
 [openapi.json](openapi.json), which can be imported into Postman. It uses the
 same commands and argument rules listed below.
 
+`MULTI`, `EXEC`, and `DISCARD` require a persistent TCP connection and are not
+available through this stateless HTTP endpoint. HTTP commands still use the
+shared command mutex, so they cannot interrupt a TCP transaction's execution.
+
 ### Check the server
 
 ```powershell
@@ -277,6 +281,46 @@ For example, `GET tasks` after creating a list named `tasks` returns:
 (error) WRONGTYPE Operation against a key holding the wrong kind of value
 ```
 
+## Transactions (TCP)
+
+Each client connection has its own transaction queue. Enter `MULTI` to start
+queueing commands and `EXEC` to execute them in order:
+
+```text
+127.0.0.1:6379> MULTI
+OK
+127.0.0.1:6379> SET color blue
+QUEUED
+127.0.0.1:6379> GET color
+QUEUED
+127.0.0.1:6379> EXEC
+1) OK
+2) "blue"
+```
+
+| Command | Result |
+| --- | --- |
+| `MULTI` | Starts this connection's transaction and returns `OK` |
+| `EXEC` | Runs queued commands and returns an array of their replies |
+| `DISCARD` | Cancels the queue without executing it and returns `OK` |
+
+- Queued commands do not read or change the store until `EXEC`.
+- Other clients can use the server while a transaction is being queued.
+- During `EXEC`, no other TCP or HTTP command can execute between its commands.
+- Replies preserve each command's type, including nested arrays and errors.
+- An empty transaction returns an empty array.
+- An unknown command or bad argument count during queueing marks the transaction
+  as failed. `EXEC` then returns `EXECABORT` without running any queued commands.
+- Execution-time errors, such as `WRONGTYPE` or an invalid score, become error
+  elements in the result array. Remaining commands still run; there is no rollback.
+- Nested `MULTI` calls are rejected. `EXEC` and `DISCARD` outside a transaction
+  return errors.
+- `EXEC`, `DISCARD`, or disconnecting clears the connection's transaction state.
+
+`WATCH` and optimistic locking are not implemented. See the
+[Redis transaction documentation](https://redis.io/docs/latest/develop/using-commands/transactions/)
+for the underlying queueing and error behavior.
+
 ## How it works
 
 1. `net.Listen` opens the TCP listener.
@@ -285,8 +329,11 @@ For example, `GET tasks` after creating a list named `tasks` returns:
 4. The dispatcher checks the command and arguments, then calls the store.
 5. Reply helpers format RESP responses, sent through `conn.Write`.
 
-All clients share one store protected by a mutex. Each store operation holds
-the lock while reading or changing data.
+All clients share one store. Its command mutex serializes normal commands and
+holds off other clients for the whole execution of `EXEC`. A separate map mutex
+protects each store operation. `EXEC` calls the dispatcher without reacquiring
+the command mutex, so the transaction cannot deadlock on its own lock. Both
+locks are released before writing a reply to the network.
 
 | Value type | Go representation |
 | --- | --- |
@@ -360,7 +407,7 @@ mini-miniredis/
 ├── internal/
 │   ├── clock/       # Real and manual clocks, with tests
 │   ├── api/         # HTTP handlers and JSON replies, with tests
-│   ├── server/      # Listener, connection handler, and connection tests
+│   ├── server/      # Listener, connection handler, transactions, and tests
 │   ├── resp/        # RESP parser and reply formatting
 │   ├── store/       # Typed values, mutex, and data-type operations
 │   └── commands/    # Dispatcher, command handlers, and command tests
@@ -382,8 +429,9 @@ go build ./...
 ```
 
 Tests cover RESP parsing, fragmented and pipelined requests, shared client data,
-data-type operations, wrong-type errors, concurrent access, manual time, and HTTP
-request validation and JSON responses.
+data-type operations, wrong-type errors, concurrent access, manual time, HTTP
+request validation, JSON responses, per-connection transaction queues, aborted
+transactions, and atomic execution against competing TCP and HTTP clients.
 
 If your Go environment supports cgo and has a C compiler installed, also run:
 
@@ -395,7 +443,7 @@ go test -race ./...
 
 - Data exists only in memory; there is no persistence or expiration.
 - Only the command forms listed above are implemented. Advanced options,
-  transactions, blocking commands, pub/sub, and streams are not available.
+  WATCH, blocking commands, pub/sub, and streams are not available.
 - The protocol is a subset of RESP2; RESP3 is not supported.
 - There is one shared keyspace, with no database selection, authentication, or TLS.
 - The server binds to localhost by default and is intended for local learning

@@ -3,7 +3,7 @@
   "info": {
     "title": "mini-miniredis HTTP API",
     "version": "0.1.0",
-    "description": "A local JSON interface to the same store used by the Redis TCP listener. Command arguments are strings. Command results are returned as JSON strings, integers, arrays of strings, or null. This API is intended for UTF-8 text; use the TCP interface for arbitrary binary data. No authentication is required."
+    "description": "A local JSON interface to the same store used by the Redis TCP listener. Command arguments are strings. Command results are returned as JSON strings, integers, arrays of strings, or null. This API is intended for UTF-8 text; use the TCP interface for arbitrary binary data. No authentication is required. MULTI, EXEC, and DISCARD are TCP-only; HTTP commands share the transaction execution mutex but cannot create transaction queues."
   },
   "servers": [{ "url": "http://127.0.0.1:8080" }],
   "paths": {
@@ -111,12 +111,13 @@
         "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
       },
       "BadRequest": {
-        "description": "Malformed request, invalid arguments, unknown command, or wrong key type. The command is not retried.",
+        "description": "Malformed request, invalid arguments, unknown command, wrong key type, or TCP-only transaction command. The command is not retried.",
         "content": {
           "application/json": {
             "schema": { "$ref": "#/components/schemas/Error" },
             "examples": {
               "unknownCommand": { "value": { "error": "ERR unknown command" } },
+              "transactionNeedsTCP": { "value": { "error": "ERR transactions require a persistent TCP connection" } },
               "wrongType": { "value": { "error": "WRONGTYPE Operation against a key holding the wrong kind of value" } }
             }
           }

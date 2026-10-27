@@ -8,8 +8,26 @@ import (
 )
 
 func Dispatch(db *store.Store, args []string) string {
-	if len(args) == 0 {
-		return resp.Error("empty command")
+	db.LockCommands()
+	defer db.UnlockCommands()
+	return dispatch(db, args)
+}
+
+// ExecuteTransaction holds the same lock as Dispatch, once for the entire queue.
+func ExecuteTransaction(db *store.Store, queue [][]string) string {
+	db.LockCommands()
+	defer db.UnlockCommands()
+	replies := make([]string, 0, len(queue))
+	for _, args := range queue {
+		// Calling Dispatch here would try to lock the mutex again and deadlock.
+		replies = append(replies, dispatch(db, args))
+	}
+	return resp.Replies(replies)
+}
+
+func dispatch(db *store.Store, args []string) string {
+	if err := Validate(args); err != nil {
+		return resp.Error(err.Error())
 	}
 	command := strings.ToUpper(args[0])
 	switch command {
@@ -52,6 +70,8 @@ func Dispatch(db *store.Store, args []string) string {
 		return hashCommand(db, command, args)
 	case "ZADD", "ZRANGE", "ZSCORE", "ZREM", "ZCARD":
 		return sortedSetCommand(db, command, args)
+	case "MULTI", "EXEC", "DISCARD":
+		return resp.Error("transactions require a persistent TCP connection")
 	default:
 		return resp.Error("unknown command")
 	}

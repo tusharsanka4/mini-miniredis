@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 
-	"github.com/tusharsanka4/mini-miniredis/internal/commands"
 	"github.com/tusharsanka4/mini-miniredis/internal/resp"
 )
 
@@ -14,6 +13,8 @@ func (s *server) handleConnection(conn net.Conn) {
 
 	// The buffered reader calls conn.Read and keeps bytes for the next command.
 	reader := bufio.NewReader(conn)
+	// Only this connection's goroutine can access its transaction queue.
+	var tx transaction
 	for {
 		args, err := resp.ReadCommand(reader)
 		if err != nil {
@@ -23,7 +24,7 @@ func (s *server) handleConnection(conn net.Conn) {
 			return
 		}
 
-		if _, err := conn.Write([]byte(commands.Dispatch(s.store, args))); err != nil {
+		if _, err := conn.Write([]byte(tx.handle(s.store, args))); err != nil {
 			return
 		}
 	}

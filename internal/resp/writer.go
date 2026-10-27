@@ -37,3 +37,8 @@ func Array(values []string) string {
 	}
 	return reply.String()
 }
+
+// Replies wraps already-encoded replies, preserving their types and nested arrays.
+func Replies(replies []string) string {
+	return "*" + strconv.Itoa(len(replies)) + "\r\n" + strings.Join(replies, "")
+}

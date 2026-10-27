@@ -21,9 +21,20 @@ type entry struct {
 
 // Store holds the values shared by all client connections.
 type Store struct {
-	mu     sync.Mutex
-	values map[string]*entry
-	clock  clock.Clock
+	commandMu sync.Mutex
+	mu        sync.Mutex
+	values    map[string]*entry
+	clock     clock.Clock
+}
+
+// The command lock is shared by TCP and HTTP. EXEC holds it for the whole queue.
+// The separate map mutex still protects each individual store operation.
+func (s *Store) LockCommands() {
+	s.commandMu.Lock()
+}
+
+func (s *Store) UnlockCommands() {
+	s.commandMu.Unlock()
 }
 
 func New() *Store {

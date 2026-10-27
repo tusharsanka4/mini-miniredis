@@ -87,6 +87,9 @@ func TestRequestErrorsDoNotWrite(t *testing.T) {
 		{"too many arguments", `{"command":["DEL"` + strings.Repeat(`,"key"`, 1024) + `]}`, "application/json", 400},
 		{"wrong arity", `{"command":["SET","key"]}`, "application/json", 400},
 		{"unknown command", `{"command":["NOPE"]}`, "application/json", 400},
+		{"MULTI needs a connection", `{"command":["MULTI"]}`, "application/json", 400},
+		{"EXEC needs a connection", `{"command":["EXEC"]}`, "application/json", 400},
+		{"DISCARD needs a connection", `{"command":["DISCARD"]}`, "application/json", 400},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
