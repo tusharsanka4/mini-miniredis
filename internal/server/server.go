@@ -11,7 +11,7 @@ type server struct {
 	store *store.Store
 }
 
-func Start(address string) error {
+func Start(address string, db *store.Store) error {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
@@ -19,7 +19,7 @@ func Start(address string) error {
 	defer listener.Close()
 
 	fmt.Println("MiniRedis listening on", listener.Addr())
-	s := &server{store: store.New()}
+	s := &server{store: db}
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
